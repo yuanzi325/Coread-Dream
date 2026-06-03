@@ -198,6 +198,19 @@ if (p2.partial_paragraph && p2.partial_next_offset !== null) {
 }
 assert('combined calls cover full paragraph', finalCombined.length === 1500, `got ${finalCombined.length}`);
 
+const pBeyond = handleTool('read_range', { book_id: longId, start_idx: 0, end_idx: 0, max_chars: 1000, include_comments: false, start_offset: 999999 });
+assert('offset beyond paragraph returns empty text', pBeyond.text === '', JSON.stringify({ text: pBeyond.text, chars: pBeyond.chars }));
+assert('offset beyond paragraph does not emit empty marker', !pBeyond.text.startsWith('[0] '));
+assert('offset beyond paragraph is not truncated', pBeyond.truncated === false);
+assert('offset beyond paragraph is not partial', pBeyond.partial_paragraph === false);
+
+const skipBook = handleTool('import_book', { title: 'SkipOffset_' + Date.now(), content: 'Short first paragraph.\\n\\nSecond paragraph remains.' });
+assert('skip-offset book imported', skipBook.ok === true);
+const skip = handleTool('read_range', { book_id: skipBook.book_id, start_idx: 0, end_idx: 1, max_chars: 1000, include_comments: false, start_offset: 999999 });
+assert('offset beyond first paragraph skips to next paragraph', skip.text.startsWith('[1] Second paragraph remains.'), JSON.stringify({ text: skip.text }));
+assert('skip-offset returned_start_idx is next paragraph', skip.returned_start_idx === 1, `got ${skip.returned_start_idx}`);
+assert('skip-offset returned_end_idx is next paragraph', skip.returned_end_idx === 1, `got ${skip.returned_end_idx}`);
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 if (failed > 0) process.exit(1);
