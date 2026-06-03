@@ -1,1 +1,3 @@
-node_modules/\ndata/\npublic/
+node_modules/
+data/
+public/
