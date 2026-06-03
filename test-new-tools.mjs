@@ -160,6 +160,44 @@ assert('update_progress still works', up.ok === true);
 const lc = handleTool('list_comments', { book_id: bookId });
 assert('list_comments still works', Array.isArray(lc));
 
+// ── Test 7: partial paragraph boundary (single paragraph > max_chars) ─────────
+console.log('\n--- Test 7: partial paragraph boundary ---');
+// Import a book with one paragraph of 1500 chars — exceeds min max_chars of 1000
+const longContent = 'X'.repeat(1500);
+const longBook = handleTool('import_book', { title: 'LongPara_' + Date.now(), content: longContent });
+assert('long-para book imported', longBook.ok === true);
+const longId = longBook.book_id;
+
+// Call 1: max_chars=1000, should trigger partial slice
+const p1 = handleTool('read_range', { book_id: longId, start_idx: 0, end_idx: 0, max_chars: 1000, include_comments: false });
+assert('p1: partial_paragraph is true', p1.partial_paragraph === true, JSON.stringify({ chars: p1.chars, truncated: p1.truncated }));
+assert('p1: chars does not exceed budget', p1.chars <= 1000, `chars=${p1.chars}`);
+assert('p1: truncated is true', p1.truncated === true);
+assert('p1: next_start_idx equals start_idx (same para)', p1.next_start_idx === 0);
+assert('p1: partial_start_offset is 0', p1.partial_start_offset === 0);
+assert('p1: partial_next_offset > 0', p1.partial_next_offset > 0);
+assert('p1: text contains [0] marker', p1.text.startsWith('[0] '));
+
+// Call 2: continue from partial_next_offset — remaining 1500-partial_next_offset chars should fit
+const p2 = handleTool('read_range', { book_id: longId, start_idx: 0, end_idx: 0, max_chars: 1000, include_comments: false, start_offset: p1.partial_next_offset });
+// partial_start_offset is only set when the call is itself partial; p2 may not be partial
+assert('p2: if partial, partial_start_offset === p1.partial_next_offset',
+  !p2.partial_paragraph || p2.partial_start_offset === p1.partial_next_offset,
+  `p2.partial_paragraph=${p2.partial_paragraph}, partial_start_offset=${p2.partial_start_offset}`);
+assert('p2: text is non-empty', p2.text.length > 0);
+assert('p2: chars within budget', p2.chars <= 1000, `chars=${p2.chars}`);
+
+// Verify combined content covers the full paragraph
+const extractContent = t => t.replace(/^\[\d+\] /, '');
+const combined = extractContent(p1.text) + extractContent(p2.text);
+// If p2 is still partial, chain one more call
+let finalCombined = combined;
+if (p2.partial_paragraph && p2.partial_next_offset !== null) {
+  const p3 = handleTool('read_range', { book_id: longId, start_idx: 0, end_idx: 0, max_chars: 1000, include_comments: false, start_offset: p2.partial_next_offset });
+  finalCombined += extractContent(p3.text);
+}
+assert('combined calls cover full paragraph', finalCombined.length === 1500, `got ${finalCombined.length}`);
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`);
 if (failed > 0) process.exit(1);

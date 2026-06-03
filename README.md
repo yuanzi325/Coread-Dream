@@ -74,6 +74,36 @@ Streamable HTTP端点：`http://你的服务器:3001/mcp`
 | `import_book` | 导入文本或epub |
 | `delete_comment` | 删除批注 |
 | `update_progress` | 更新阅读进度 |
+| `get_chapters` | 获取章节列表及段落范围（省 token 共读用） |
+| `read_range` | 按段落范围读取原文，`max_chars` 控制用量，支持超长段落续读 |
+| `reading_note` | 读书笔记：`get` / `update` / `append`，用于共读上下文恢复 |
+
+## 省 token 共读推荐流程
+
+AI 进行共读时建议按以下顺序调用工具，避免不必要的 token 消耗：
+
+```
+1. list_books
+   → 确认书名和 book_id
+
+2. get_chapters
+   → 获得章节列表（title / start_idx / end_idx / page）
+   → 选定本次要读的章节范围
+
+3. read_range(book_id, start_idx, end_idx, max_chars=8000)
+   → 按段落范围读取，max_chars 防止单次过长
+   → 若 truncated=true，用 next_start_idx 继续下一次调用
+   → 若 partial_paragraph=true（单段超长），用 start_offset=partial_next_offset 续读同一段
+
+4. add_comment / reading_note append
+   → 边读边批注或记录共读笔记
+
+5. reading_note update/append
+   → 每章读完后更新笔记，下次共读可先 get 恢复上下文
+   → 无需重读原文
+```
+
+**注意**：`import_book` 的 `data` 参数接受 base64 epub，仅用于导入，**不建议** AI 在对话中传递整本 epub 的 base64 内容，那会消耗大量上下文 token。导入请在终端或前端操作。
 
 ## 配置项
 
