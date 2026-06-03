@@ -28,6 +28,49 @@ npm start       # 启动服务器
 
 浏览器打开 `http://localhost:3000`。
 
+同时启动 Web 阅读器和远程 MCP：
+
+```bash
+npm run start:all
+```
+
+默认端点：
+
+- Web 阅读器：`http://localhost:3000`
+- MCP SSE：`http://localhost:3001/sse`
+- MCP Streamable HTTP：`http://localhost:3001/mcp`
+
+### Coolify 部署
+
+用同一个应用同时跑 Web 和 MCP：
+
+```text
+Build Command: npm ci && npm run build
+Start Command: npm run start:all
+Ports: 3000, 3001
+```
+
+环境变量：
+
+```text
+COREAD_PORT=3000
+COREAD_MCP_PORT=3001
+COREAD_DB=/app/data/coread.db
+```
+
+持久化存储：
+
+```text
+/app/data
+```
+
+域名建议：
+
+```text
+阅读器域名 -> 3000
+MCP 域名 -> 3001
+```
+
 ## MCP配置
 
 ### Claude Code（stdio）
