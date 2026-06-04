@@ -1,0 +1,30 @@
+# Coolify Docker Compose deployment for Coread.
+# Two services share the same image and the same persistent /app/data volume so
+# the web/API and the remote MCP server read/write the same SQLite coread.db.
+services:
+  coread-web:
+    build: .
+    command: node server.mjs
+    environment:
+      - COREAD_PORT=3000
+      - COREAD_DB=/app/data/coread.db
+    expose:
+      - "3000"
+    volumes:
+      - coread-data:/app/data
+    restart: unless-stopped
+
+  coread-mcp:
+    build: .
+    command: node mcp-sse.mjs
+    environment:
+      - COREAD_MCP_PORT=3001
+      - COREAD_DB=/app/data/coread.db
+    expose:
+      - "3001"
+    volumes:
+      - coread-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  coread-data:

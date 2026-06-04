@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node server.mjs",
     "start:all": "node start-all.mjs",
+    "start:web": "node server.mjs",
+    "start:mcp": "node mcp-sse.mjs",
     "dev": "npx vite",
     "build": "npx vite build",
     "mcp": "node mcp-stdio.mjs",
