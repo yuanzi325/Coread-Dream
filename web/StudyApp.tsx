@@ -94,6 +94,69 @@ function toast(msg: string) {
     setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2000);
 }
 
+// ── Latin word-boundary pagination helpers ──────────────────────────────────
+// Chinese/Japanese/Korean text has no spaces between words, so it is paginated
+// at the character level. For English/Latin text we nudge the page break onto a
+// whitespace boundary so a word is never sliced across two pages and the next
+// page never starts with trailing punctuation. These helpers only *advise* the
+// break point; the caller always re-validates with the real layout measurer and
+// falls back to the character offset if no clean boundary helps, so pagination
+// always makes forward progress (no empty pages, no deadlock on long words).
+
+// CJK punctuation, Hiragana, Katakana, CJK ideographs (+ ext A / compat),
+// fullwidth forms and Hangul. Presence of these means "don't word-wrap".
+const CJK_RE = /[　-〿぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿＀-￯가-힯]/;
+// Latin "trailing" punctuation that should never start a line.
+const LATIN_TRAILING_PUNCT = /[,.;:!?)\]}"'”’]/;
+
+function isLatinSpace(ch: string | undefined): boolean {
+    return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ' ';
+}
+// Word characters: latin letters/digits + latin-1/extended + intra-word marks
+// (apostrophe, hyphen) so "don't" and "well-known" are treated as one word.
+function isLatinWordChar(ch: string | undefined): boolean {
+    if (!ch) return false;
+    return /[A-Za-z0-9À-ɏ'’\-]/.test(ch);
+}
+
+// Returns true when the paragraph is predominantly Latin script, so it is safe
+// to apply word-boundary wrapping. Mixed text with a meaningful share of CJK
+// keeps the original character-level behaviour.
+function isMostlyLatinText(text: string): boolean {
+    const sample = text.length > 400 ? text.slice(0, 400) : text;
+    let cjk = 0, latin = 0;
+    for (const ch of sample) {
+        if (CJK_RE.test(ch)) cjk++;
+        else if (/[A-Za-z]/.test(ch)) latin++;
+    }
+    if (latin === 0) return false;
+    return cjk <= latin * 0.15;
+}
+
+// A break at index `b` is bad if it sits inside a word (word char on both
+// sides) or if the next page would start with trailing punctuation glued to the
+// previous word (e.g. ", of course").
+function isBadLatinPageStart(text: string, b: number): boolean {
+    if (b <= 0 || b >= text.length) return false;
+    const prev = text[b - 1], cur = text[b];
+    if (isLatinWordChar(prev) && isLatinWordChar(cur)) return true;
+    if (isLatinWordChar(prev) && LATIN_TRAILING_PUNCT.test(cur)) return true;
+    return false;
+}
+
+// Move a break index back to the nearest clean word start (char after a space,
+// not itself a space or trailing punctuation). Returns the adjusted index, or
+// the original `b` if no clean earlier boundary exists.
+function snapLatinBreakOffset(text: string, b: number): number {
+    for (let i = b; i > 0; i--) {
+        const prev = text[i - 1], cur = text[i];
+        if (isLatinSpace(prev) && cur !== undefined && !isLatinSpace(cur) && !LATIN_TRAILING_PUNCT.test(cur)) {
+            return i;
+        }
+    }
+    return b;
+}
+
 const StudyApp: React.FC = () => {
     const c = themeColors(245, 25, 65);
 
@@ -571,6 +634,17 @@ const StudyApp: React.FC = () => {
                         else hi = mid - 1;
                     }
                     if (best === offset) best = Math.min(text.length, offset + 1);
+                    // English/Latin: snap the break onto a word boundary so words
+                    // aren't sliced across pages and the next page doesn't open
+                    // with trailing punctuation. CJK keeps char-level breaks. Any
+                    // adjustment is re-validated with fits() and must still make
+                    // forward progress, else we keep the original character offset.
+                    if (best > offset && best < text.length && isBadLatinPageStart(text, best) && isMostlyLatinText(text)) {
+                        const snapped = snapLatinBreakOffset(text, best);
+                        if (snapped > offset && snapped < best && fits(buildMeasureBlock(para, paraIndex, offset, snapped))) {
+                            best = snapped;
+                        }
+                    }
                     // widow control: 段刚开始(offset===0)且这页只塞得下 <4 字 且这页已有别的内容 → 推整段下一页
                     if (offset === 0 && best > 0 && best < 4 && measurer.childElementCount > 0) {
                         break;
