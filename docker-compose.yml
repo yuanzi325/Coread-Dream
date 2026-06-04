@@ -20,6 +20,9 @@ services:
     environment:
       - COREAD_MCP_PORT=3001
       - COREAD_DB=/app/data/coread.db
+      # Optional Bearer auth: set COREAD_MCP_TOKEN in Coolify (not in the repo).
+      # Empty/unset leaves the MCP server open, preserving current behaviour.
+      - COREAD_MCP_TOKEN=${COREAD_MCP_TOKEN:-}
     expose:
       - "3001"
     volumes:

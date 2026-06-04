@@ -9,6 +9,27 @@ const DB_PATH = process.env.COREAD_DB || path.join(process.cwd(), 'data', 'corea
 const PORT = parseInt(process.env.COREAD_MCP_PORT || '3001');
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVICE = 'coread-mcp';
+
+// Optional Bearer-token auth. When COREAD_MCP_TOKEN is unset/empty the server
+// stays fully open (unchanged behaviour); when set, every non-health, non-CORS
+// request must carry `Authorization: Bearer <token>`.
+const MCP_TOKEN = process.env.COREAD_MCP_TOKEN || '';
+const AUTH_REQUIRED = MCP_TOKEN.length > 0;
+
+// Constant-time bearer check. Never logs or echoes the token.
+function checkAuth(req) {
+  if (!AUTH_REQUIRED) return { ok: true };
+  const header = req.headers['authorization'] || '';
+  const m = /^Bearer\s+(.+)$/i.exec(header);
+  if (!m) return { ok: false, reason: 'missing bearer token' };
+  const provided = Buffer.from(m[1].trim());
+  const expected = Buffer.from(MCP_TOKEN);
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+    return { ok: false, reason: 'auth failed' };
+  }
+  return { ok: true };
+}
+
 initDb(DB_PATH);
 
 // sessionId -> { res, createdAt, lastSeen, initialized }
@@ -145,7 +166,7 @@ function readJsonBody(req) {
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, Authorization');
   res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
 
   if (req.method === 'OPTIONS') {
@@ -182,6 +203,18 @@ const server = http.createServer(async (req, res) => {
       tools: tools.length,
       sessions: sessions.size,
     }));
+    return;
+  }
+
+  // ── Auth gate ────────────────────────────────────────────────────────────────
+  // Everything past here is an MCP endpoint. OPTIONS preflight and /health are
+  // already handled above and stay public. When a token is configured, reject
+  // unauthenticated requests with 401 (never echo the token, log a summary only).
+  const auth = checkAuth(req);
+  if (!auth.ok) {
+    logErr(`unauthorized ${req.method} ${url.pathname}: ${auth.reason}`);
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
 
@@ -300,5 +333,6 @@ server.listen(PORT, () => {
   console.log(`  ❤️  Health:           http://localhost:${PORT}/health`);
   console.log(`  🔗 SSE:              http://localhost:${PORT}/sse`);
   console.log(`  🔗 Streamable HTTP:  http://localhost:${PORT}/mcp`);
+  console.log(`  🔐 Auth: ${AUTH_REQUIRED ? 'Bearer token required' : 'open (no token set)'}`);
   console.log(`  📂 Database: ${path.basename(DB_PATH)}\n`);
 });
