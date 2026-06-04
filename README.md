@@ -304,6 +304,38 @@ single SQLite database.
 > Tip: for the MCP subdomain behind Cloudflare, set DNS to **DNS only** (grey
 > cloud) as noted above, then verify with `GET /health`.
 
+### Protecting the MCP server (optional Bearer token)
+
+The remote MCP server (`coread-mcp`) supports an **optional** Bearer token so
+public scanners and unknown clients can't reach the MCP endpoints.
+
+- Set `COREAD_MCP_TOKEN` to a long random string in **Coolify → coread-mcp →
+  Environment Variables**. **Never commit the token to GitHub** — the compose
+  file only forwards `COREAD_MCP_TOKEN=${COREAD_MCP_TOKEN:-}`, the value lives in
+  Coolify.
+- When the variable is **empty/unset**, the MCP server stays open (unchanged
+  behaviour). When it has a value, every MCP request must send:
+
+  ```
+  Authorization: Bearer <COREAD_MCP_TOKEN>
+  ```
+
+- Protected endpoints: `/sse`, `/messages`, `/mcp` (and any other non-health
+  path). Unauthenticated requests get `401 {"error":"Unauthorized"}`.
+- **`GET /health` stays public** (no token) so Coolify/Cloudflare/browser health
+  checks keep working; it never returns the token.
+- `coread-web` does **not** use this variable — the web reader at
+  `read.yuan-own-server.uk` is unaffected.
+
+Quick check after setting `COREAD_MCP_TOKEN`:
+
+```bash
+curl -s https://readmcp.yuan-own-server.uk/health                  # 200 (public)
+curl -s -o /dev/null -w '%{http_code}\n' https://readmcp.yuan-own-server.uk/mcp -X POST   # 401
+curl -s -H "Authorization: Bearer $COREAD_MCP_TOKEN" \
+     https://readmcp.yuan-own-server.uk/mcp -X POST -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'   # ok
+```
+
 ## License
 
 MIT
