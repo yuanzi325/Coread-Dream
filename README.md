@@ -37,6 +37,7 @@ npm run start:all
 默认端点：
 
 - Web 阅读器：`http://localhost:3000`
+- MCP 健康检查：`http://localhost:3001/health`
 - MCP SSE：`http://localhost:3001/sse`
 - MCP Streamable HTTP：`http://localhost:3001/mcp`
 
@@ -71,6 +72,45 @@ COREAD_DB=/app/data/coread.db
 MCP 域名 -> 3001
 ```
 
+#### MCP 端点与健康检查
+
+MCP 服务在 3001 端口暴露三个 HTTP 端点：
+
+| 端点 | 用途 | Content-Type |
+|------|------|--------------|
+| `GET /health` | 健康检查 / 探活，返回 `{ ok, service, transport, time, db }` | `application/json` |
+| `GET /sse` | SSE 传输，建立连接后返回 `/messages?sessionId=…` 端点 | `text/event-stream` |
+| `POST /mcp` | Streamable HTTP 传输（无状态 JSON-RPC） | `application/json` |
+
+部署后可先用 `/health` 确认服务起来了：
+
+```bash
+curl https://你的MCP域名/health
+# {"ok":true,"service":"coread-mcp","transport":["sse","streamable-http"],...}
+```
+
+`/health` 只返回数据库文件名（basename）和 `db_configured`，不会泄露完整路径或任何 token / secret。
+
+#### Cloudflare 注意事项
+
+如果 MCP 域名挂在 Cloudflare 后面，**建议先把 MCP 子域设为 DNS only（灰云，不走橙色代理）**。
+
+- Cloudflare 代理对 SSE 这类长连接 / 流式响应处理不一定友好，容易出现连接被提前关闭、`no active transport`、SSE 拉不通等问题。
+- 先用 DNS only 把链路跑通、确认 Claude 远程 MCP 能稳定连上，再按需决定是否开代理。
+- Web 阅读器域名（3000）正常走代理没问题，这条只针对 MCP 域名（3001）。
+
+#### 连接排查建议
+
+接入 Claude 远程 MCP 时，建议按由浅入深的顺序排查：
+
+```
+1. GET /health        → 确认服务存活、传输模式、DB 配置
+2. tools/call ping     → 确认 MCP 链路通（区分“链路问题”和“业务工具问题”）
+3. 再测业务工具         → get_chapters / read_range 等
+```
+
+`ping` 工具只返回 `{ ok, message, time }`，不碰数据库，是判断「是网络/传输挂了，还是某个业务工具挂了」的最快办法。
+
 ## MCP配置
 
 ### Claude Code（stdio）
@@ -94,12 +134,13 @@ MCP 域名 -> 3001
 npm run mcp:sse   # 启动SSE/HTTP MCP服务器（默认端口3001）
 ```
 
+健康检查：`http://你的服务器:3001/health`
 SSE端点：`http://你的服务器:3001/sse`
 Streamable HTTP端点：`http://你的服务器:3001/mcp`
 
 环境变量 `COREAD_MCP_PORT` 可以改端口。
 
-在claude.ai设置里添加为远程MCP服务器即可。支持SSE和Streamable HTTP两种传输模式。
+在claude.ai设置里添加为远程MCP服务器即可。支持SSE和Streamable HTTP两种传输模式。接好后建议先调用 `ping` 工具确认链路，再调用业务工具。
 
 ### 其他MCP客户端
 
@@ -120,6 +161,7 @@ Streamable HTTP端点：`http://你的服务器:3001/mcp`
 | `get_chapters` | 获取章节列表及段落范围（省 token 共读用） |
 | `read_range` | 按段落范围读取原文，`max_chars` 控制用量，支持超长段落续读 |
 | `reading_note` | 读书笔记：`get` / `update` / `append`，用于共读上下文恢复 |
+| `ping` | 最小连通性检查，返回 `{ ok, message, time }`，用于区分链路问题和业务工具问题 |
 
 ## 省 token 共读推荐流程
 
@@ -226,10 +268,13 @@ Open `http://localhost:3000` in your browser.
 npm run mcp:sse   # Starts SSE/HTTP MCP server on port 3001
 ```
 
+- Health check: `http://your-server:3001/health`
 - SSE endpoint: `http://your-server:3001/sse`
 - Streamable HTTP endpoint: `http://your-server:3001/mcp`
 
 Works with any MCP-compatible client — not limited to Claude. Three transport modes: stdio, SSE, Streamable HTTP.
+
+**Deploying behind Cloudflare:** set the MCP subdomain to **DNS only** (grey cloud) first — the proxy can interfere with SSE long-lived streams. Verify the link with `GET /health` and the `ping` tool before testing business tools.
 
 ## License
 
