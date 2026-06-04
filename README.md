@@ -276,6 +276,34 @@ Works with any MCP-compatible client — not limited to Claude. Three transport 
 
 **Deploying behind Cloudflare:** set the MCP subdomain to **DNS only** (grey cloud) first — the proxy can interfere with SSE long-lived streams. Verify the link with `GET /health` and the `ping` tool before testing business tools.
 
+## Coolify (Docker Compose) deployment
+
+The repository ships a `docker-compose.yml` that runs the same image as **two**
+services from one codebase:
+
+| Service       | Command            | Port | Purpose               |
+| ------------- | ------------------ | ---- | --------------------- |
+| `coread-web`  | `node server.mjs`  | 3000 | Web UI + API          |
+| `coread-mcp`  | `node mcp-sse.mjs` | 3001 | Remote MCP (SSE/HTTP) |
+
+Both services mount the same `coread-data` volume at **`/app/data`** and point
+`COREAD_DB` at `/app/data/coread.db`, so the web app and the MCP server share a
+single SQLite database.
+
+### Steps in Coolify
+
+1. Create a new resource from this Git repository.
+2. **Build Pack:** choose **Docker Compose**.
+3. **Compose Location:** `docker-compose.yml`.
+4. Set up domains (no fixed host ports are bound, so there are no port clashes):
+   - Bind the web domain to **`coread-web:3000`**, e.g. `https://read.yuan-own-server.uk`
+   - Bind the MCP domain to **`coread-mcp:3001`**, e.g. `https://readmcp.yuan-own-server.uk`
+5. Make sure the persistent volume **`/app/data`** is kept across deploys — it
+   holds `coread.db`.
+
+> Tip: for the MCP subdomain behind Cloudflare, set DNS to **DNS only** (grey
+> cloud) as noted above, then verify with `GET /health`.
+
 ## License
 
 MIT
