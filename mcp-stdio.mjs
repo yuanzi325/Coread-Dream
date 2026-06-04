@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from 'path';
 import { initDb } from './lib/db.mjs';
-import { tools, handleTool } from './lib/mcp-tools.mjs';
+import { tools, handleTool, buildToolResult, buildToolError } from './lib/mcp-tools.mjs';
 
 const DB_PATH = process.env.COREAD_DB || path.join(process.cwd(), 'data', 'coread.db');
 initDb(DB_PATH);
@@ -46,14 +46,9 @@ function handleMessage(msg) {
     const { name, arguments: args } = msg.params;
     try {
       const result = handleTool(name, args || {});
-      send({ jsonrpc: '2.0', id: msg.id, result: {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      }});
+      send({ jsonrpc: '2.0', id: msg.id, result: buildToolResult(name, result) });
     } catch (e) {
-      send({ jsonrpc: '2.0', id: msg.id, result: {
-        content: [{ type: 'text', text: `Error: ${e.message}` }],
-        isError: true,
-      }});
+      send({ jsonrpc: '2.0', id: msg.id, result: buildToolError(e.message) });
     }
   } else if (msg.id !== undefined) {
     send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } });
