@@ -204,7 +204,7 @@ assert('offset beyond paragraph does not emit empty marker', !pBeyond.text.start
 assert('offset beyond paragraph is not truncated', pBeyond.truncated === false);
 assert('offset beyond paragraph is not partial', pBeyond.partial_paragraph === false);
 
-const skipBook = handleTool('import_book', { title: 'SkipOffset_' + Date.now(), content: 'Short first paragraph.\\n\\nSecond paragraph remains.' });
+const skipBook = handleTool('import_book', { title: 'SkipOffset_' + Date.now(), content: ['Short first paragraph.', 'Second paragraph remains.'].join('\n\n') });
 assert('skip-offset book imported', skipBook.ok === true);
 const skip = handleTool('read_range', { book_id: skipBook.book_id, start_idx: 0, end_idx: 1, max_chars: 1000, include_comments: false, start_offset: 999999 });
 assert('offset beyond first paragraph skips to next paragraph', skip.text.startsWith('[1] Second paragraph remains.'), JSON.stringify({ text: skip.text }));
