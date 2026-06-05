@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect, useCallback, useRef, startTransition, useLayoutEffect } from 'react';
 import { api } from './api';
+// @ts-ignore — shared plain-JS text helpers (no type declarations needed)
+import { findPageBreakOffset, dehyphenateWrap } from '../lib/text-split.mjs';
 
 function themeColors(h: number, s: number, l: number) {
     const primary = `hsl(${h}, ${s}%, ${l}%)`;
@@ -92,69 +94,6 @@ function toast(msg: string) {
     Object.assign(el.style, { position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.75)', color: '#fff', padding: '8px 20px', borderRadius: '20px', fontSize: '13px', zIndex: '9999', pointerEvents: 'none', transition: 'opacity 0.3s' });
     document.body.appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2000);
-}
-
-// ── Latin word-boundary pagination helpers ──────────────────────────────────
-// Chinese/Japanese/Korean text has no spaces between words, so it is paginated
-// at the character level. For English/Latin text we nudge the page break onto a
-// whitespace boundary so a word is never sliced across two pages and the next
-// page never starts with trailing punctuation. These helpers only *advise* the
-// break point; the caller always re-validates with the real layout measurer and
-// falls back to the character offset if no clean boundary helps, so pagination
-// always makes forward progress (no empty pages, no deadlock on long words).
-
-// CJK punctuation, Hiragana, Katakana, CJK ideographs (+ ext A / compat),
-// fullwidth forms and Hangul. Presence of these means "don't word-wrap".
-const CJK_RE = /[　-〿぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿＀-￯가-힯]/;
-// Latin "trailing" punctuation that should never start a line.
-const LATIN_TRAILING_PUNCT = /[,.;:!?)\]}"'”’]/;
-
-function isLatinSpace(ch: string | undefined): boolean {
-    return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === ' ';
-}
-// Word characters: latin letters/digits + latin-1/extended + intra-word marks
-// (apostrophe, hyphen) so "don't" and "well-known" are treated as one word.
-function isLatinWordChar(ch: string | undefined): boolean {
-    if (!ch) return false;
-    return /[A-Za-z0-9À-ɏ'’\-]/.test(ch);
-}
-
-// Returns true when the paragraph is predominantly Latin script, so it is safe
-// to apply word-boundary wrapping. Mixed text with a meaningful share of CJK
-// keeps the original character-level behaviour.
-function isMostlyLatinText(text: string): boolean {
-    const sample = text.length > 400 ? text.slice(0, 400) : text;
-    let cjk = 0, latin = 0;
-    for (const ch of sample) {
-        if (CJK_RE.test(ch)) cjk++;
-        else if (/[A-Za-z]/.test(ch)) latin++;
-    }
-    if (latin === 0) return false;
-    return cjk <= latin * 0.15;
-}
-
-// A break at index `b` is bad if it sits inside a word (word char on both
-// sides) or if the next page would start with trailing punctuation glued to the
-// previous word (e.g. ", of course").
-function isBadLatinPageStart(text: string, b: number): boolean {
-    if (b <= 0 || b >= text.length) return false;
-    const prev = text[b - 1], cur = text[b];
-    if (isLatinWordChar(prev) && isLatinWordChar(cur)) return true;
-    if (isLatinWordChar(prev) && LATIN_TRAILING_PUNCT.test(cur)) return true;
-    return false;
-}
-
-// Move a break index back to the nearest clean word start (char after a space,
-// not itself a space or trailing punctuation). Returns the adjusted index, or
-// the original `b` if no clean earlier boundary exists.
-function snapLatinBreakOffset(text: string, b: number): number {
-    for (let i = b; i > 0; i--) {
-        const prev = text[i - 1], cur = text[i];
-        if (isLatinSpace(prev) && cur !== undefined && !isLatinSpace(cur) && !LATIN_TRAILING_PUNCT.test(cur)) {
-            return i;
-        }
-    }
-    return b;
 }
 
 const StudyApp: React.FC = () => {
@@ -536,7 +475,7 @@ const StudyApp: React.FC = () => {
             imgEl.style.width = '100%';
             outer.appendChild(imgEl);
         } else {
-            const displayText = stripHeading(para.content).slice(start, end);
+            const displayText = prepareText(para.content).slice(start, end);
             const inner = document.createElement('div');
             inner.textContent = displayText || ' ';
             inner.style.fontSize = `${chapterTitle ? 18 : para.content.trim().startsWith('# ') ? 17 : para.content.trim().startsWith('## ') ? 16 : 14}px`;
@@ -605,7 +544,7 @@ const StudyApp: React.FC = () => {
                 let progressed = false;
                 while (paraIndex < allParas.length) {
                     const para = allParas[paraIndex];
-                    const text = stripHeading(para.content);
+                    const text = prepareText(para.content);
                     if (offset === 0 && paraIndex > 0 && isChapterStart(para.content) && measurer.childElementCount > 0) break;
 
                     const full = buildMeasureBlock(para, paraIndex, offset, text.length);
@@ -634,13 +573,13 @@ const StudyApp: React.FC = () => {
                         else hi = mid - 1;
                     }
                     if (best === offset) best = Math.min(text.length, offset + 1);
-                    // English/Latin: snap the break onto a word boundary so words
-                    // aren't sliced across pages and the next page doesn't open
-                    // with trailing punctuation. CJK keeps char-level breaks. Any
-                    // adjustment is re-validated with fits() and must still make
-                    // forward progress, else we keep the original character offset.
-                    if (best > offset && best < text.length && isBadLatinPageStart(text, best) && isMostlyLatinText(text)) {
-                        const snapped = snapLatinBreakOffset(text, best);
+                    // Script-aware break: Latin/mixed text snaps onto a word
+                    // boundary (no half-words, no leading punctuation); CJK nudges
+                    // onto nearby punctuation. The advised break is re-validated
+                    // with fits() and must still make forward progress, else we
+                    // keep the original character offset (e.g. one giant word).
+                    {
+                        const snapped = findPageBreakOffset(text, best, offset);
                         if (snapped > offset && snapped < best && fits(buildMeasureBlock(para, paraIndex, offset, snapped))) {
                             best = snapped;
                         }
@@ -700,7 +639,7 @@ const StudyApp: React.FC = () => {
         for (let i = start.paraIndex; i < end.paraIndex || (i === end.paraIndex && end.offset > 0); i++) {
             const para = allParas[i];
             if (!para) continue;
-            const text = stripHeading(para.content);
+            const text = prepareText(para.content);
             const from = i === start.paraIndex ? start.offset : 0;
             const to = i === end.paraIndex ? end.offset : text.length;
             if (to <= from) continue;
@@ -900,6 +839,11 @@ const StudyApp: React.FC = () => {
         return x.paragraph_idx <= idx && idx <= endPara;
     });
     const stripHeading = (s: string) => s.replace(/^#+\s*/, '');
+    // Canonical reader text: strip heading markup, then repair hard-wrap
+    // hyphenation ("some-\nthing" -> "something"). All measuring, slicing,
+    // rendering and comment-offset math go through this single transform so
+    // offsets stay consistent.
+    const prepareText = (s: string): string => dehyphenateWrap(stripHeading(s));
     const isHeading = (s: string) => s.trim().startsWith('#');
     const isChapterStart = (s: string) => {
         const trimmed = s.trim();

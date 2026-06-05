@@ -15,7 +15,8 @@
     "dev": "npx vite",
     "build": "npx vite build",
     "mcp": "node mcp-stdio.mjs",
-    "mcp:sse": "node mcp-sse.mjs"
+    "mcp:sse": "node mcp-sse.mjs",
+    "test": "node test-new-tools.mjs && node test-text-split.mjs"
   },
   "keywords": [
     "mcp",
