@@ -92,6 +92,16 @@ ok('does not touch em dash', dehyphenateWrap('wait—\nno') === 'wait—\nno');
 ok('keeps hyphen before capital (compound)', dehyphenateWrap('Sino-\nJapanese') === 'Sino-\nJapanese');
 ok('no-op when no hyphen', dehyphenateWrap('plain text') === 'plain text');
 
+// Per-paragraph policy (mirrors StudyApp prepareText): paragraphs that carry a
+// comment anchor skip cleanup so old highlight offsets never drift; others get
+// cleaned. Verified with a pure stand-in of the decision.
+const stripHeadingT = s => s.replace(/^#+\s*/, '');
+const prepare = (content, annotated) => annotated ? stripHeadingT(content) : dehyphenateWrap(stripHeadingT(content));
+const hp = 'an inter-\nesting note';
+ok('policy: unannotated paragraph is cleaned', prepare(hp, false) === 'an interesting note');
+ok('policy: annotated paragraph keeps raw text (no offset drift)', prepare(hp, true) === hp);
+ok('policy: cleanup removes exactly hyphen+newline (2 chars)', hp.length - prepare(hp, false).length === 2);
+
 // ── chunk-level (MCP read_range) boundary snapping ───────────────────────────
 console.log('\n--- chunk boundary (MCP read_range) ---');
 const para = 'The quick brown fox jumps over the lazy dog. Then it runs away quickly into the woods.';
