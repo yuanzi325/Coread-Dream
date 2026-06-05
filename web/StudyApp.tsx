@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef, startTransition, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, startTransition, useLayoutEffect, useMemo } from 'react';
 import { api } from './api';
 // @ts-ignore — shared plain-JS text helpers (no type declarations needed)
 import { findPageBreakOffset, dehyphenateWrap } from '../lib/text-split.mjs';
@@ -116,6 +116,19 @@ const StudyApp: React.FC = () => {
     const measureRef = useRef<HTMLDivElement>(null);
     const [allParas, setAllParas] = useState<Paragraph[]>([]);
     const [allComments, setAllComments] = useState<Comment[]>([]);
+    // Paragraphs that carry a positional comment anchor. Their stored
+    // sel_start/end offsets were recorded against the un-cleaned text, so we
+    // skip hyphenation cleanup on these to avoid shifting old highlights. New
+    // books without annotations still get the cleanup. (See prepareText.)
+    const annotatedParaIdx = useMemo(() => {
+        const s = new Set<number>();
+        for (const cmt of allComments) {
+            if (cmt.sel_start_idx == null) continue;
+            const end = cmt.sel_end_para_idx ?? cmt.paragraph_idx;
+            for (let k = cmt.paragraph_idx; k <= end; k++) s.add(k);
+        }
+        return s;
+    }, [allComments]);
     const [pageHeight, setPageHeight] = useState(0);
     const [readerSize, setReaderSize] = useState({ width: 0, height: 0 });
     const savedParaIdxRef = useRef<number | null>(null);
@@ -475,7 +488,7 @@ const StudyApp: React.FC = () => {
             imgEl.style.width = '100%';
             outer.appendChild(imgEl);
         } else {
-            const displayText = prepareText(para.content).slice(start, end);
+            const displayText = prepareText(para).slice(start, end);
             const inner = document.createElement('div');
             inner.textContent = displayText || ' ';
             inner.style.fontSize = `${chapterTitle ? 18 : para.content.trim().startsWith('# ') ? 17 : para.content.trim().startsWith('## ') ? 16 : 14}px`;
@@ -544,7 +557,7 @@ const StudyApp: React.FC = () => {
                 let progressed = false;
                 while (paraIndex < allParas.length) {
                     const para = allParas[paraIndex];
-                    const text = prepareText(para.content);
+                    const text = prepareText(para);
                     if (offset === 0 && paraIndex > 0 && isChapterStart(para.content) && measurer.childElementCount > 0) break;
 
                     const full = buildMeasureBlock(para, paraIndex, offset, text.length);
@@ -619,7 +632,7 @@ const StudyApp: React.FC = () => {
         };
         run();
         return () => { cancelled = true; };
-    }, [mode, allParas, readerContentWidth, readerSize.height]);
+    }, [mode, allParas, readerContentWidth, readerSize.height, annotatedParaIdx]);
 
     useEffect(() => {
         if (allParas.length === 0 || pageBreaks.length === 0) {
@@ -639,7 +652,7 @@ const StudyApp: React.FC = () => {
         for (let i = start.paraIndex; i < end.paraIndex || (i === end.paraIndex && end.offset > 0); i++) {
             const para = allParas[i];
             if (!para) continue;
-            const text = prepareText(para.content);
+            const text = prepareText(para);
             const from = i === start.paraIndex ? start.offset : 0;
             const to = i === end.paraIndex ? end.offset : text.length;
             if (to <= from) continue;
@@ -842,8 +855,14 @@ const StudyApp: React.FC = () => {
     // Canonical reader text: strip heading markup, then repair hard-wrap
     // hyphenation ("some-\nthing" -> "something"). All measuring, slicing,
     // rendering and comment-offset math go through this single transform so
-    // offsets stay consistent.
-    const prepareText = (s: string): string => dehyphenateWrap(stripHeading(s));
+    // offsets stay consistent. Dehyphenation is skipped for paragraphs that
+    // already carry a comment anchor, so existing highlights (recorded against
+    // the un-cleaned text) never drift; paragraphs without anchors still get
+    // cleaned. Normal text without a hard-wrap hyphen is unaffected either way.
+    const prepareText = (para: Paragraph): string => {
+        const base = stripHeading(para.content);
+        return annotatedParaIdx.has(Number(para.idx)) ? base : dehyphenateWrap(base);
+    };
     const isHeading = (s: string) => s.trim().startsWith('#');
     const isChapterStart = (s: string) => {
         const trimmed = s.trim();
